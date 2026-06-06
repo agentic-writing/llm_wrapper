@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-wrapper"
+version = "0.1.0"
+description = "Provider-agnostic LLM call layer (Anthropic, OpenAI, Ollama, Fake)"
+requires-python = ">=3.10"
+
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.30.0",
+    "requests>=2.31.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+gemini = [
+    "google-genai>=0.8.0",
+]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: live API call — skipped automatically when the provider key is absent",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_wrapper*"]
