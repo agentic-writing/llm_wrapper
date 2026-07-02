@@ -53,7 +53,7 @@ class OpenAIProvider(BaseProvider):
 
         response = self.client.chat.completions.create(
             model=model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             messages=messages,
         )
 
@@ -75,7 +75,7 @@ class OpenAIProvider(BaseProvider):
 
         response = self.client.chat.completions.create(
             model=model,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             tools=[self._to_openai_tool(tool_schema)],
             tool_choice={"type": "function", "function": {"name": tool_name}},
             messages=messages,
