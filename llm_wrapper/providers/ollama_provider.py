@@ -89,6 +89,7 @@ class OllamaProvider(BaseProvider):
         response.raise_for_status()
 
         data = response.json()
+        self._raise_if_truncated(data.get("done_reason") == "length", max_tokens)
         return (data.get("message", {}).get("content") or "").strip()
 
     def call_tool(
@@ -136,7 +137,9 @@ class OllamaProvider(BaseProvider):
                     timeout=self.timeout,
                 )
                 response.raise_for_status()
-                tool_calls = response.json().get("message", {}).get("tool_calls")
+                native_data = response.json()
+                self._raise_if_truncated(native_data.get("done_reason") == "length", max_tokens)
+                tool_calls = native_data.get("message", {}).get("tool_calls")
 
                 if tool_calls:
                     arguments = tool_calls[0]["function"]["arguments"]

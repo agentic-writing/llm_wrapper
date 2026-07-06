@@ -48,6 +48,8 @@ class GeminiProvider(BaseProvider):
             contents=prompt,
             config=config,
         )
+        finish_reason = getattr(response.candidates[0], "finish_reason", None) if response.candidates else None
+        self._raise_if_truncated(finish_reason == "MAX_TOKENS", max_tokens)
         return (response.text or "").strip()
 
     def call_tool(
@@ -79,6 +81,9 @@ class GeminiProvider(BaseProvider):
             contents=prompt,
             config=config,
         )
+        finish_reason = getattr(response.candidates[0], "finish_reason", None) if response.candidates else None
+        self._raise_if_truncated(finish_reason == "MAX_TOKENS", max_tokens)
+
         for candidate in response.candidates:
             for part in candidate.content.parts:
                 fc = getattr(part, "function_call", None)

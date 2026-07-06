@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-wrapper"
-version = "0.1.3"
+version = "0.1.4"
 description = "Provider-agnostic LLM call layer (Anthropic, OpenAI, Ollama, Fake)"
 requires-python = ">=3.10"
 

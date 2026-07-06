@@ -56,6 +56,7 @@ class OpenAIProvider(BaseProvider):
             max_completion_tokens=max_tokens,
             messages=messages,
         )
+        self._raise_if_truncated(response.choices[0].finish_reason == "length", max_tokens)
 
         return (response.choices[0].message.content or "").strip()
 
@@ -80,6 +81,8 @@ class OpenAIProvider(BaseProvider):
             tool_choice={"type": "function", "function": {"name": tool_name}},
             messages=messages,
         )
+
+        self._raise_if_truncated(response.choices[0].finish_reason == "length", max_tokens)
 
         tool_calls = response.choices[0].message.tool_calls
         if not tool_calls:

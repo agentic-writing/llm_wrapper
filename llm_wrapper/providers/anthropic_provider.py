@@ -36,6 +36,7 @@ class AnthropicProvider(BaseProvider):
             kwargs["system"] = system
 
         response = self.client.messages.create(**kwargs)
+        self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
 
         return "\n".join(
             block.text
@@ -63,6 +64,7 @@ class AnthropicProvider(BaseProvider):
             kwargs["system"] = system
 
         response = self.client.messages.create(**kwargs)
+        self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
 
         for block in response.content:
             if (
