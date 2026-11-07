@@ -18,6 +18,7 @@ import zlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import httpx
 import pytest
 
 import llm_wrapper.llm as llm_module
@@ -253,6 +254,7 @@ class TestAnthropicRequest:
     def _provider(self):
         from llm_wrapper.providers.anthropic_provider import AnthropicProvider
         provider = AnthropicProvider.__new__(AnthropicProvider)
+        provider._no_forced_tool = set()
         provider.client = MagicMock()
         provider.client.messages.create.return_value = SimpleNamespace(
             stop_reason="end_turn",
@@ -289,6 +291,98 @@ class TestAnthropicRequest:
         with pytest.raises(ValueError):
             call(provider, [_JPEG_BYTES])
         provider.client.messages.create.assert_not_called()
+
+
+class TestAnthropicToolChoice:
+    """Some models reject a forced tool_choice; those must fall back to auto."""
+
+    FORCED = {"type": "tool", "name": "classify_sentiment"}
+    REJECTED = 'tool_choice: type "tool" and "any" are not supported for this model.'
+
+    def _bad_request(self, message):
+        from anthropic import BadRequestError
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        return BadRequestError(message, response=httpx.Response(400, request=request), body=None)
+
+    def _provider(self, rejects_forced):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        provider = AnthropicProvider.__new__(AnthropicProvider)
+        provider._no_forced_tool = set()
+        provider.client = MagicMock()
+        reply = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", name="classify_sentiment", input={"label": "neutral"})],
+        )
+
+        def create(**kwargs):
+            if rejects_forced and kwargs["tool_choice"]["type"] != "auto":
+                raise self._bad_request(self.REJECTED)
+            return reply
+
+        provider.client.messages.create.side_effect = create
+        return provider
+
+    def _call(self, provider, images=None, system="base system"):
+        return provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=5,
+                                  system=system, images=images)
+
+    def _calls(self, provider):
+        return [c.kwargs for c in provider.client.messages.create.call_args_list]
+
+    def test_supporting_model_is_forced_with_unchanged_request(self):
+        provider = self._provider(rejects_forced=False)
+        assert self._call(provider) == {"label": "neutral"}
+        calls = self._calls(provider)
+        assert len(calls) == 1
+        assert calls[0]["tool_choice"] == self.FORCED
+        assert calls[0]["system"] == "base system"
+
+    def test_rejecting_model_falls_back_to_auto_with_instruction(self):
+        provider = self._provider(rejects_forced=True)
+        assert self._call(provider) == {"label": "neutral"}
+        first, second = self._calls(provider)
+        assert first["tool_choice"] == self.FORCED
+        assert second["tool_choice"] == {"type": "auto"}
+        assert second["system"].startswith("base system")
+        assert "must respond by calling the classify_sentiment tool" in second["system"]
+
+    def test_fallback_works_without_a_system_prompt(self):
+        provider = self._provider(rejects_forced=True)
+        self._call(provider, system="")
+        assert self._calls(provider)[1]["system"] == "You must respond by calling the classify_sentiment tool."
+
+    def test_fallback_keeps_images(self):
+        provider = self._provider(rejects_forced=True)
+        self._call(provider, images=[_RED_PNG])
+        fallback = self._calls(provider)[1]["messages"][0]["content"]
+        assert fallback[0]["type"] == "image" and fallback[-1] == {"type": "text", "text": "p"}
+
+    def test_rejection_is_remembered_per_model(self):
+        provider = self._provider(rejects_forced=True)
+        self._call(provider)
+        self._call(provider)
+        assert [c["tool_choice"]["type"] for c in self._calls(provider)] == ["tool", "auto", "auto"]
+
+    def test_other_bad_requests_still_raise(self):
+        from anthropic import BadRequestError
+        provider = self._provider(rejects_forced=False)
+        provider.client.messages.create.side_effect = self._bad_request("max_tokens: too large")
+        with pytest.raises(BadRequestError):
+            self._call(provider)
+        assert len(self._calls(provider)) == 1
+
+    def test_answering_in_text_after_fallback_raises(self):
+        provider = self._provider(rejects_forced=True)
+        text_reply = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="no tool")])
+
+        def create(**kwargs):
+            if kwargs["tool_choice"]["type"] != "auto":
+                raise self._bad_request(self.REJECTED)
+            return text_reply
+
+        provider.client.messages.create.side_effect = create
+        with pytest.raises(RuntimeError, match="did not call expected tool"):
+            self._call(provider)
 
 
 class TestOpenAIRequest:
@@ -559,6 +653,23 @@ class TestAnthropicProvider(_LiveImageTests):
     def test_call_tool(self):
         result = self.provider.call_tool("I love this product!", _SENTIMENT_SCHEMA, "classify_sentiment", model=self.MODEL, max_tokens=64)
         assert result.get("label") in ("positive", "negative", "neutral")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set")
+class TestAnthropicModelWithoutForcedTool(_LiveImageTests):
+    """This model rejects a forced tool_choice, so it exercises the auto fallback."""
+    MODEL = "claude-sonnet-5-5"
+    IMAGE_MODEL = MODEL
+
+    def setup_method(self):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        self.provider = AnthropicProvider()
+
+    def test_call_tool(self):
+        result = self.provider.call_tool("I love this product!", _SENTIMENT_SCHEMA, "classify_sentiment", model=self.MODEL, max_tokens=2000)
+        assert result.get("label") in ("positive", "negative", "neutral")
+        assert self.MODEL in self.provider._no_forced_tool
 
 
 @pytest.mark.integration

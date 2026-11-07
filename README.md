@@ -73,6 +73,8 @@ result = call_llm_with_tool(
 # result → {"label": "positive"}
 ```
 
+Some Anthropic models reject a forced `tool_choice` with a 400 error. For those, the provider falls back to `tool_choice: auto` and adds an instruction to the system prompt to call the tool. If the model still answers in text, `call_llm_with_tool` raises `RuntimeError`, the same as any missing tool call.
+
 **Images** (both call types, all providers):
 ```python
 with open("plot.png", "rb") as f:
