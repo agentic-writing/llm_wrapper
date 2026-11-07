@@ -73,6 +73,25 @@ result = call_llm_with_tool(
 # result → {"label": "positive"}
 ```
 
+**Images** (both call types, all providers):
+```python
+with open("plot.png", "rb") as f:
+    image = f.read()
+
+result = call_llm_with_tool(
+    prompt="Which way does the curve in this image bend?",
+    tool_schema=schema,
+    tool_name="report_bend",
+    model="claude-haiku-4-5",
+    images=[image],   # list of PNG bytes
+)
+```
+
+- Only PNG is accepted. Anything else raises `ValueError` before a request is sent.
+- Images are placed ahead of the prompt in the user message. Ollama sends them in a separate `images` field, so it has no text-relative order.
+- Ollama raises `RuntimeError` if the model doesn't report `vision` support, or if that can't be confirmed. Calls without images never make this check.
+- With `LOG_LLM_CALLS=1`, the log records `image_count` but never the image bytes.
+
 ## Provider resolution
 
 When `provider` is not passed explicitly, it is resolved in this order:

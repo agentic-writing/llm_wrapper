@@ -40,6 +40,7 @@ class FakeProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> str:
         self.calls.append({
             "type": "text",
@@ -47,6 +48,7 @@ class FakeProvider(BaseProvider):
             "model": model,
             "max_tokens": max_tokens,
             "system": system,
+            "images": self._check_images(images),
         })
 
         if self.text_responses:
@@ -65,6 +67,7 @@ class FakeProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> dict:
         self.calls.append({
             "type": "tool",
@@ -74,6 +77,7 @@ class FakeProvider(BaseProvider):
             "model": model,
             "max_tokens": max_tokens,
             "system": system,
+            "images": self._check_images(images),
         })
 
         if self.tool_responses:

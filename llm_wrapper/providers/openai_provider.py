@@ -39,17 +39,31 @@ class OpenAIProvider(BaseProvider):
             },
         }
 
+    @classmethod
+    def _user_content(cls, prompt: str, images: list[bytes] | None) -> str | list[dict]:
+        """Plain string without images; otherwise image parts first, then the text."""
+        encoded = cls._images_to_base64(images)
+        if not encoded:
+            return prompt
+        parts: list[dict] = [
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{data}"}}
+            for data in encoded
+        ]
+        parts.append({"type": "text", "text": prompt})
+        return parts
+
     def call_text(
         self,
         prompt: str,
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> str:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": self._user_content(prompt, images)})
 
         response = self.client.chat.completions.create(
             model=model,
@@ -68,11 +82,12 @@ class OpenAIProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> dict:
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        messages.append({"role": "user", "content": self._user_content(prompt, images)})
 
         response = self.client.chat.completions.create(
             model=model,

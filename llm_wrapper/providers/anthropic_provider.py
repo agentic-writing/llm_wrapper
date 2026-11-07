@@ -20,17 +20,31 @@ class AnthropicProvider(BaseProvider):
             raise RuntimeError("ANTHROPIC_API_KEY missing")
         self.client = Anthropic()
 
+    @classmethod
+    def _user_content(cls, prompt: str, images: list[bytes] | None) -> str | list[dict]:
+        """Plain string without images; otherwise image blocks first, then the text."""
+        encoded = cls._images_to_base64(images)
+        if not encoded:
+            return prompt
+        blocks: list[dict] = [
+            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": data}}
+            for data in encoded
+        ]
+        blocks.append({"type": "text", "text": prompt})
+        return blocks
+
     def call_text(
         self,
         prompt: str,
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> str:
         kwargs: dict = dict(
             model=model,
             max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": self._user_content(prompt, images)}],
         )
         if system:
             kwargs["system"] = system
@@ -52,13 +66,14 @@ class AnthropicProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> dict:
         kwargs: dict = dict(
             model=model,
             max_tokens=max_tokens,
             tools=[tool_schema],
             tool_choice={"type": "tool", "name": tool_name},
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": self._user_content(prompt, images)}],
         )
         if system:
             kwargs["system"] = system

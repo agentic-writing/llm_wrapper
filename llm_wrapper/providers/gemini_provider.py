@@ -32,12 +32,25 @@ class GeminiProvider(BaseProvider):
         self.client = genai.Client(api_key=api_key)
         self._types = types
 
+    def _contents(self, prompt: str, images: list[bytes] | None) -> str | list:
+        """Plain string without images; otherwise image parts first, then the text."""
+        checked = self._check_images(images)
+        if not checked:
+            return prompt
+        parts: list = [
+            self._types.Part.from_bytes(data=bytes(image), mime_type="image/png")
+            for image in checked
+        ]
+        parts.append(prompt)
+        return parts
+
     def call_text(
         self,
         prompt: str,
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> str:
         config = self._types.GenerateContentConfig(
             system_instruction=system or None,
@@ -45,7 +58,7 @@ class GeminiProvider(BaseProvider):
         )
         response = self.client.models.generate_content(
             model=model,
-            contents=prompt,
+            contents=self._contents(prompt, images),
             config=config,
         )
         finish_reason = getattr(response.candidates[0], "finish_reason", None) if response.candidates else None
@@ -60,6 +73,7 @@ class GeminiProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> dict[str, Any]:
         types = self._types
         declaration = types.FunctionDeclaration(
@@ -78,7 +92,7 @@ class GeminiProvider(BaseProvider):
         )
         response = self.client.models.generate_content(
             model=model,
-            contents=prompt,
+            contents=self._contents(prompt, images),
             config=config,
         )
         finish_reason = getattr(response.candidates[0], "finish_reason", None) if response.candidates else None

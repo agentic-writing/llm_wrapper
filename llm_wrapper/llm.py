@@ -75,7 +75,8 @@ def _resolve_provider(provider: str | None, model: str) -> str:
 
 
 def _log_call(call_type: str, provider: str, model: str, system: str,
-              prompt: str, response: str, tool_name: str = None) -> None:
+              prompt: str, response: str, tool_name: str = None,
+              image_count: int = 0) -> None:
     if not LOG_LLM_CALLS:
         return
     entry = {
@@ -89,6 +90,8 @@ def _log_call(call_type: str, provider: str, model: str, system: str,
     }
     if tool_name:
         entry["tool_name"] = tool_name
+    if image_count:
+        entry["image_count"] = image_count  # the count only; image bytes are never logged
     with open(LOGS_DIR / "llm_calls.jsonl", "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -99,12 +102,15 @@ def call_llm(
     provider: str = None,
     max_tokens: int = 4096,
     system: str = "",
+    images: list[bytes] | None = None,
 ) -> str:
+    """images: optional PNG bytes, placed ahead of the prompt in the user message."""
     resolved = _resolve_provider(provider, model)
     response = _get_provider(resolved).call_text(
-        prompt=prompt, model=model, max_tokens=max_tokens, system=system,
+        prompt=prompt, model=model, max_tokens=max_tokens, system=system, images=images,
     )
-    _log_call("text", resolved, model, system, prompt, response)
+    _log_call("text", resolved, model, system, prompt, response,
+              image_count=len(images) if images else 0)
     return response
 
 
@@ -116,11 +122,14 @@ def call_llm_with_tool(
     provider: str = None,
     max_tokens: int = 4096,
     system: str = "",
+    images: list[bytes] | None = None,
 ) -> dict:
+    """images: optional PNG bytes, placed ahead of the prompt in the user message."""
     resolved = _resolve_provider(provider, model)
     response = _get_provider(resolved).call_tool(
         prompt=prompt, tool_schema=tool_schema, tool_name=tool_name,
-        model=model, max_tokens=max_tokens, system=system,
+        model=model, max_tokens=max_tokens, system=system, images=images,
     )
-    _log_call("tool", resolved, model, system, prompt, json.dumps(response), tool_name)
+    _log_call("tool", resolved, model, system, prompt, json.dumps(response), tool_name,
+              image_count=len(images) if images else 0)
     return response

@@ -33,6 +33,17 @@ class OllamaProvider(BaseProvider):
         self.timeout     = int(os.getenv("OLLAMA_TIMEOUT", "60"))
         self.temperature = float(os.getenv("OLLAMA_TEMPERATURE", "0.0"))
         self._tool_support_cache: dict[str, bool] = {}
+        self._vision_confirmed: set[str] = set()
+
+    def _fetch_capabilities(self, model: str) -> list[str]:
+        """Return the capabilities `model` advertises via POST /api/show; raises on failure."""
+        response = requests.post(
+            f"{self.base_url}/api/show",
+            json={"model": model},
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        return response.json().get("capabilities", [])
 
     def _supports_tools(self, model: str) -> bool:
         """
@@ -45,17 +56,37 @@ class OllamaProvider(BaseProvider):
         """
         if model not in self._tool_support_cache:
             try:
-                response = requests.post(
-                    f"{self.base_url}/api/show",
-                    json={"model": model},
-                    timeout=self.timeout,
-                )
-                response.raise_for_status()
-                capabilities = response.json().get("capabilities", [])
-                self._tool_support_cache[model] = "tools" in capabilities
+                self._tool_support_cache[model] = "tools" in self._fetch_capabilities(model)
             except Exception:
                 self._tool_support_cache[model] = False
         return self._tool_support_cache[model]
+
+    def _require_vision(self, model: str) -> None:
+        """
+        Raise unless `model` advertises "vision" support, so a text-only model can
+        never be mistaken for one that saw the image. Unlike tool support there is no
+        safe fallback, so a failed check also raises. Only a confirmed model is cached,
+        which lets a later call succeed after a network hiccup.
+        """
+        if model in self._vision_confirmed:
+            return
+        try:
+            capabilities = self._fetch_capabilities(model)
+        except Exception as e:
+            raise RuntimeError(f"Could not confirm Ollama model {model!r} supports images: {e}") from e
+        if "vision" not in capabilities:
+            raise RuntimeError(
+                f"Ollama model {model!r} does not support images (capabilities: {capabilities})."
+            )
+        self._vision_confirmed.add(model)
+
+    def _user_message(self, prompt: str, images: list[bytes] | None) -> dict:
+        """Build the user message; Ollama carries images in a separate field, not in content."""
+        message = {"role": "user", "content": prompt}
+        encoded = self._images_to_base64(images)
+        if encoded:
+            message["images"] = encoded
+        return message
 
     def call_text(
         self,
@@ -63,13 +94,17 @@ class OllamaProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> str:
+        if self._check_images(images):
+            self._require_vision(model)
+
         messages = []
 
         if system:
             messages.append({"role": "system", "content": system})
 
-        messages.append({"role": "user", "content": prompt})
+        messages.append(self._user_message(prompt, images))
 
         payload = {
             "model": model,
@@ -100,6 +135,7 @@ class OllamaProvider(BaseProvider):
         model: str,
         max_tokens: int = 4096,
         system: str = "",
+        images: list[bytes] | None = None,
     ) -> dict:
         """
         Use Ollama's native tool-calling (POST /api/chat with tools=[...]) for models
@@ -111,13 +147,17 @@ class OllamaProvider(BaseProvider):
         Ollama doesn't validate arguments against the schema server-side, so a returned
         tool call is only accepted if it has all of the schema's required fields.
         Any failure in the native path (missing/wrong fields, no tool call, request
-        error) falls back to prompt-based JSON emulation.
+        error) falls back to prompt-based JSON emulation. Images are sent on every one
+        of these requests, and an unsupported model raises before any of them.
         """
+        if self._check_images(images):
+            self._require_vision(model)
+
         if self._supports_tools(model):
             messages = []
             if system:
                 messages.append({"role": "system", "content": system})
-            messages.append({"role": "user", "content": prompt})
+            messages.append(self._user_message(prompt, images))
 
             payload = {
                 "model": model,
@@ -161,6 +201,7 @@ class OllamaProvider(BaseProvider):
             model=model,
             max_tokens=max_tokens,
             system=system,
+            images=images,
         )
 
     def _call_tool_via_json_prompt(
@@ -171,6 +212,7 @@ class OllamaProvider(BaseProvider):
         model: str,
         max_tokens: int,
         system: str,
+        images: list[bytes] | None = None,
     ) -> dict:
         """Fallback for models/servers without native tool-calling: prompt for raw JSON."""
         json_prompt = self._build_json_tool_prompt(
@@ -184,6 +226,7 @@ class OllamaProvider(BaseProvider):
             model=model,
             max_tokens=max_tokens,
             system=system,
+            images=images,
         )
 
         try:
@@ -208,6 +251,7 @@ class OllamaProvider(BaseProvider):
                 model=model,
                 max_tokens=max_tokens,
                 system=system,
+                images=images,
             )
 
             return self._parse_json(raw2)
