@@ -18,7 +18,10 @@ import zlib
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import httpx
+try:
+    import httpx2 as httpx  # anthropic >= 1.0 is built on httpx2
+except ImportError:
+    import httpx  # older anthropic releases use httpx
 import pytest
 
 import llm_wrapper.llm as llm_module
