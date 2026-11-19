@@ -95,7 +95,9 @@ class OllamaProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> str:
+        self._reject_effort(effort, "Ollama")
         if self._check_images(images):
             self._require_vision(model)
 
@@ -136,6 +138,7 @@ class OllamaProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> dict:
         """
         Use Ollama's native tool-calling (POST /api/chat with tools=[...]) for models
@@ -150,6 +153,7 @@ class OllamaProvider(BaseProvider):
         error) falls back to prompt-based JSON emulation. Images are sent on every one
         of these requests, and an unsupported model raises before any of them.
         """
+        self._reject_effort(effort, "Ollama")
         if self._check_images(images):
             self._require_vision(model)
 

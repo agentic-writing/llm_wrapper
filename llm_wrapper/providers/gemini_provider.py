@@ -51,7 +51,9 @@ class GeminiProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> str:
+        self._reject_effort(effort, "Gemini")
         config = self._types.GenerateContentConfig(
             system_instruction=system or None,
             max_output_tokens=max_tokens,
@@ -74,7 +76,9 @@ class GeminiProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> dict[str, Any]:
+        self._reject_effort(effort, "Gemini")
         types = self._types
         declaration = types.FunctionDeclaration(
             name=tool_name,

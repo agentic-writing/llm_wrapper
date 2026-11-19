@@ -76,7 +76,7 @@ def _resolve_provider(provider: str | None, model: str) -> str:
 
 def _log_call(call_type: str, provider: str, model: str, system: str,
               prompt: str, response: str, tool_name: str = None,
-              image_count: int = 0) -> None:
+              image_count: int = 0, effort: str | None = None) -> None:
     if not LOG_LLM_CALLS:
         return
     entry = {
@@ -92,6 +92,8 @@ def _log_call(call_type: str, provider: str, model: str, system: str,
         entry["tool_name"] = tool_name
     if image_count:
         entry["image_count"] = image_count  # the count only; image bytes are never logged
+    if effort is not None:
+        entry["effort"] = effort
     with open(LOGS_DIR / "llm_calls.jsonl", "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -103,14 +105,17 @@ def call_llm(
     max_tokens: int = 4096,
     system: str = "",
     images: list[bytes] | None = None,
+    effort: str | None = None,
 ) -> str:
-    """images: optional PNG bytes, placed ahead of the prompt in the user message."""
+    """images: optional PNG bytes, placed ahead of the prompt in the user message.
+    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default."""
     resolved = _resolve_provider(provider, model)
     response = _get_provider(resolved).call_text(
         prompt=prompt, model=model, max_tokens=max_tokens, system=system, images=images,
+        effort=effort,
     )
     _log_call("text", resolved, model, system, prompt, response,
-              image_count=len(images) if images else 0)
+              image_count=len(images) if images else 0, effort=effort)
     return response
 
 
@@ -123,13 +128,16 @@ def call_llm_with_tool(
     max_tokens: int = 4096,
     system: str = "",
     images: list[bytes] | None = None,
+    effort: str | None = None,
 ) -> dict:
-    """images: optional PNG bytes, placed ahead of the prompt in the user message."""
+    """images: optional PNG bytes, placed ahead of the prompt in the user message.
+    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default."""
     resolved = _resolve_provider(provider, model)
     response = _get_provider(resolved).call_tool(
         prompt=prompt, tool_schema=tool_schema, tool_name=tool_name,
         model=model, max_tokens=max_tokens, system=system, images=images,
+        effort=effort,
     )
     _log_call("tool", resolved, model, system, prompt, json.dumps(response), tool_name,
-              image_count=len(images) if images else 0)
+              image_count=len(images) if images else 0, effort=effort)
     return response

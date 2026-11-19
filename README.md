@@ -75,6 +75,24 @@ result = call_llm_with_tool(
 
 Some Anthropic models reject a forced `tool_choice` with a 400 error. For those, the provider falls back to `tool_choice: auto` and adds an instruction to the system prompt to call the tool. If the model still answers in text, `call_llm_with_tool` raises `RuntimeError`, the same as any missing tool call.
 
+**Effort** (both call types, Anthropic only):
+```python
+result = call_llm_with_tool(
+    prompt="I absolutely loved this product!",
+    tool_schema=schema,
+    tool_name="classify",
+    model="claude-opus-5-5",
+    max_tokens=16000,
+    effort="high",   # e.g. "low", "medium", "high", "xhigh", "max"
+)
+```
+
+- Sent as `output_config.effort`. Omit `effort` (or pass `None`) to use the model's default.
+- The levels a model accepts differ by model; the API rejects an unsupported level with a 400 (`anthropic.BadRequestError`).
+- Higher effort means more thinking, and thinking tokens count toward `max_tokens`. If a call raises "Response truncated", raise `max_tokens`.
+- The OpenAI, Gemini and Ollama providers raise `ValueError` when `effort` is set, before any request is sent.
+- With `LOG_LLM_CALLS=1`, the log records `effort` when it is set.
+
 **Images** (both call types, all providers):
 ```python
 with open("plot.png", "rb") as f:
@@ -115,6 +133,7 @@ See `.env.example` for all options. Commonly used:
 | `GEMINI_API_KEY` | Required for Gemini |
 | `LLM_PROVIDER` | Recommended when model name is ambiguous (e.g. Ollama local models) |
 | `MODEL` | Used by `python -m llm_wrapper` smoke test only |
+| `EFFORT` | Used by `python -m llm_wrapper` smoke test only (e.g. `high`; unset = model default) |
 | `LOG_LLM_CALLS` | Set `1` to log all calls to `LLM_LOGS_DIR/llm_calls.jsonl` |
 | `OLLAMA_BASE_URL` | Default: `http://localhost:11434` |
 

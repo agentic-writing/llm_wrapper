@@ -22,13 +22,13 @@ class MyProvider(BaseProvider):
         # initialise the SDK client here
 
     def call_text(self, prompt: str, model: str, max_tokens: int = 4096, system: str = "",
-                  images: list[bytes] | None = None) -> str:
+                  images: list[bytes] | None = None, effort: str | None = None) -> str:
         # make the API call, return a plain string
         ...
 
     def call_tool(self, prompt: str, tool_schema: dict, tool_name: str,
                   model: str, max_tokens: int = 4096, system: str = "",
-                  images: list[bytes] | None = None) -> dict:
+                  images: list[bytes] | None = None, effort: str | None = None) -> dict:
         # force the model to call the tool, return a plain dict
         # tool_schema uses Anthropic format: {"name", "description", "input_schema"}
         ...
@@ -37,6 +37,8 @@ class MyProvider(BaseProvider):
 **`call_tool` contract:** must return a `dict` matching `tool_schema["input_schema"]`. Never return a string or raise on a well-formed schema. If the SDK doesn't support native tool calling, emulate it by asking the model to return strict JSON (see `ollama_provider.py` for the pattern).
 
 **`images` contract:** a list of PNG bytes, or `None`. Validate with `_check_images` or `_images_to_base64` from `BaseProvider`, and place images ahead of the prompt where the API allows it. Without images, send the same plain-text request as before. Never drop an image silently: send it on every request the call makes, or raise an error.
+
+**`effort` contract:** a string such as `"high"`, or `None` for the model's default. Without effort, send the same request as before. If the API has an effort setting, pass the value through on every request the call makes and let the API reject levels it doesn't accept. If it has none, call `self._reject_effort(effort, "MyProvider")` first, so a set effort raises `ValueError` before any request; never ignore it silently.
 
 **Optional SDK dependency:** if the SDK is not a core requirement, import it inside `__init__` with a helpful error:
 

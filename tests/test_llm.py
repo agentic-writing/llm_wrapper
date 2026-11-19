@@ -179,6 +179,25 @@ class TestCallLLM:
         assert call_llm("x", model="m", provider="prov-a") == "from fake1"
         assert call_llm("x", model="m", provider="prov-b") == "from fake2"
 
+    @pytest.mark.parametrize("kwargs, expected", [({}, None), ({"effort": "high"}, "high")],
+                             ids=["omitted", "high"])
+    def test_effort_passed_through(self, monkeypatch, kwargs, expected):
+        fake = FakeProvider()
+        self._inject(monkeypatch, fake)
+        call_llm("x", model="m", provider="fake", **kwargs)
+        call_llm_with_tool("x", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", provider="fake", **kwargs)
+        assert [c["effort"] for c in fake.calls] == [expected, expected]
+
+    def test_log_records_effort_only_when_set(self, monkeypatch, tmp_path):
+        self._inject(monkeypatch, FakeProvider())
+        monkeypatch.setattr(llm_module, "LOG_LLM_CALLS", True)
+        monkeypatch.setattr(llm_module, "LOGS_DIR", tmp_path)
+        call_llm("x", model="m", provider="fake", effort="low")
+        call_llm_with_tool("x", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", provider="fake")
+        first, second = [json.loads(line) for line in (tmp_path / "llm_calls.jsonl").read_text().splitlines()]
+        assert first["effort"] == "low"
+        assert "effort" not in second
+
 
 class TestImageValidation:
     def test_none_means_no_images(self):
@@ -239,12 +258,12 @@ class TestCallLLMImages:
         assert _b64(_RED_PNG) not in lines[0]
 
 
-def _text_call(provider, images):
-    provider.call_text("p", model="m", max_tokens=5, images=images)
+def _text_call(provider, images, **kwargs):
+    provider.call_text("p", model="m", max_tokens=5, images=images, **kwargs)
 
 
-def _tool_call(provider, images):
-    provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=5, images=images)
+def _tool_call(provider, images, **kwargs):
+    provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=5, images=images, **kwargs)
 
 
 _BOTH_CALLS = pytest.mark.parametrize("call", [_text_call, _tool_call], ids=["text", "tool"])
@@ -291,6 +310,19 @@ class TestAnthropicRequest:
         with pytest.raises(ValueError):
             call(provider, [_JPEG_BYTES])
         provider.client.messages.create.assert_not_called()
+
+    @_BOTH_CALLS
+    @pytest.mark.parametrize("effort", ["low", "high", "max"])
+    def test_effort_sent_as_output_config(self, call, effort):
+        provider = self._provider()
+        call(provider, None, effort=effort)
+        assert provider.client.messages.create.call_args.kwargs["output_config"] == {"effort": effort}
+
+    @_BOTH_CALLS
+    def test_no_effort_leaves_request_unchanged(self, call):
+        provider = self._provider()
+        call(provider, None)
+        assert "output_config" not in provider.client.messages.create.call_args.kwargs
 
 
 class TestAnthropicToolChoice:
@@ -356,6 +388,12 @@ class TestAnthropicToolChoice:
         self._call(provider, images=[_RED_PNG])
         fallback = self._calls(provider)[1]["messages"][0]["content"]
         assert fallback[0]["type"] == "image" and fallback[-1] == {"type": "text", "text": "p"}
+
+    def test_fallback_keeps_effort(self):
+        provider = self._provider(rejects_forced=True)
+        provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=5, effort="high")
+        first, second = self._calls(provider)
+        assert first["output_config"] == second["output_config"] == {"effort": "high"}
 
     def test_rejection_is_remembered_per_model(self):
         provider = self._provider(rejects_forced=True)
@@ -426,6 +464,13 @@ class TestOpenAIRequest:
             call(provider, [_JPEG_BYTES])
         provider.client.chat.completions.create.assert_not_called()
 
+    @_BOTH_CALLS
+    def test_effort_raises_before_request(self, call):
+        provider = self._provider()
+        with pytest.raises(ValueError, match="effort is not supported by the OpenAI provider"):
+            call(provider, None, effort="high")
+        provider.client.chat.completions.create.assert_not_called()
+
 
 class TestGeminiRequest:
     def _provider(self):
@@ -468,6 +513,13 @@ class TestGeminiRequest:
         provider = self._provider()
         with pytest.raises(ValueError):
             call(provider, [_JPEG_BYTES])
+        provider.client.models.generate_content.assert_not_called()
+
+    @_BOTH_CALLS
+    def test_effort_raises_before_request(self, call):
+        provider = self._provider()
+        with pytest.raises(ValueError, match="effort is not supported by the Gemini provider"):
+            call(provider, None, effort="high")
         provider.client.models.generate_content.assert_not_called()
 
 
@@ -598,6 +650,13 @@ class TestOllamaRequest:
             provider.call_text("p", model="m", max_tokens=5, images=[_JPEG_BYTES])
         assert server.show_calls == 0 and server.chat_payloads == []
 
+    @_BOTH_CALLS
+    def test_effort_raises_before_any_request(self, monkeypatch, call):
+        provider, server = self._setup(monkeypatch)
+        with pytest.raises(ValueError, match="effort is not supported by the Ollama provider"):
+            call(provider, None, effort="high")
+        assert server.show_calls == 0 and server.chat_payloads == []
+
 
 # ---------------------------------------------------------------------------
 # Integration tests
@@ -670,6 +729,32 @@ class TestAnthropicModelWithoutForcedTool(_LiveImageTests):
         result = self.provider.call_tool("I love this product!", _SENTIMENT_SCHEMA, "classify_sentiment", model=self.MODEL, max_tokens=2000)
         assert result.get("label") in ("positive", "negative", "neutral")
         assert self.MODEL in self.provider._no_forced_tool
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="ANTHROPIC_API_KEY not set")
+class TestAnthropicEffort:
+    """The API accepts output_config.effort, including on the tool_choice auto fallback."""
+    MODEL = "claude-opus-5-5"
+
+    def setup_method(self):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        self.provider = AnthropicProvider()
+
+    def test_call_text_with_effort(self):
+        result = self.provider.call_text("Reply with just the word hello.", model=self.MODEL, max_tokens=2000, effort="low")
+        assert "hello" in result.lower()
+
+    @pytest.mark.parametrize("effort", ["low", "high"])
+    def test_call_tool_with_effort(self, effort):
+        result = self.provider.call_tool("I love this product!", _SENTIMENT_SCHEMA, "classify_sentiment",
+                                         model=self.MODEL, max_tokens=4000, effort=effort)
+        assert result.get("label") in ("positive", "negative", "neutral")
+
+    def test_unknown_effort_is_rejected_by_the_api(self):
+        from anthropic import BadRequestError
+        with pytest.raises(BadRequestError):
+            self.provider.call_text("Reply with just the word hello.", model=self.MODEL, max_tokens=2000, effort="extreme")
 
 
 @pytest.mark.integration

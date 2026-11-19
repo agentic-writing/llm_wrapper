@@ -4,6 +4,10 @@ from llm_wrapper.llm import call_llm, call_llm_with_tool, _resolve_provider
 
 MODEL    = os.getenv("MODEL", "claude-haiku-4-5")
 PROVIDER = _resolve_provider(os.getenv("LLM_PROVIDER"), MODEL)
+EFFORT   = os.getenv("EFFORT") or None  # e.g. "low" or "high" (Anthropic only); unset = model default
+
+# Room for models that think before answering; thinking tokens count toward max_tokens.
+MAX_TOKENS = 2000
 
 _SCHEMA = {
     "name": "classify_sentiment",
@@ -17,9 +21,10 @@ _SCHEMA = {
     },
 }
 
-print(f"Provider: {PROVIDER}  |  Model: {MODEL}\n")
+print(f"Provider: {PROVIDER}  |  Model: {MODEL}  |  Effort: {EFFORT or 'model default'}\n")
 
-text = call_llm("Reply with exactly: hello", model=MODEL, provider=PROVIDER, max_tokens=16)
+text = call_llm("Reply with exactly: hello", model=MODEL, provider=PROVIDER, max_tokens=MAX_TOKENS,
+                effort=EFFORT)
 print(f"call_llm:           {text!r}")
 
 result = call_llm_with_tool(
@@ -28,6 +33,7 @@ result = call_llm_with_tool(
     tool_name="classify_sentiment",
     model=MODEL,
     provider=PROVIDER,
-    max_tokens=64,
+    max_tokens=MAX_TOKENS,
+    effort=EFFORT,
 )
 print(f"call_llm_with_tool: {json.dumps(result)}")

@@ -20,6 +20,7 @@ class BaseProvider(ABC):
         max_tokens: int,
         system: str,
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> str: ...
 
     @abstractmethod
@@ -32,7 +33,17 @@ class BaseProvider(ABC):
         max_tokens: int,
         system: str,
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> dict: ...
+
+    @staticmethod
+    def _reject_effort(effort: str | None, provider: str) -> None:
+        """
+        Raise ValueError unless effort is None. A provider without an effort setting must
+        not ignore one silently, or the caller would believe it took effect.
+        """
+        if effort is not None:
+            raise ValueError(f"effort is not supported by the {provider} provider (got {effort!r}).")
 
     @staticmethod
     def _check_images(images: list[bytes] | None) -> list[bytes]:

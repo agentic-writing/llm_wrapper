@@ -55,6 +55,16 @@ class AnthropicProvider(BaseProvider):
         blocks.append({"type": "text", "text": prompt})
         return blocks
 
+    @staticmethod
+    def _add_effort(kwargs: dict, effort: str | None) -> None:
+        """
+        Send effort as output_config.effort. Without it the request is unchanged and the
+        model uses its default effort. The API checks the level, since the levels a model
+        accepts differ by model.
+        """
+        if effort is not None:
+            kwargs["output_config"] = {"effort": effort}
+
     def call_text(
         self,
         prompt: str,
@@ -62,6 +72,7 @@ class AnthropicProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> str:
         kwargs: dict = dict(
             model=model,
@@ -70,6 +81,7 @@ class AnthropicProvider(BaseProvider):
         )
         if system:
             kwargs["system"] = system
+        self._add_effort(kwargs, effort)
 
         response = self.client.messages.create(**kwargs)
         self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
@@ -89,6 +101,7 @@ class AnthropicProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> dict:
         kwargs: dict = dict(
             model=model,
@@ -98,6 +111,7 @@ class AnthropicProvider(BaseProvider):
         )
         if system:
             kwargs["system"] = system
+        self._add_effort(kwargs, effort)
 
         response = self._create_calling_tool(kwargs, tool_name)
         self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)

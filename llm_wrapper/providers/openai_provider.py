@@ -59,7 +59,9 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> str:
+        self._reject_effort(effort, "OpenAI")
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
@@ -83,7 +85,9 @@ class OpenAIProvider(BaseProvider):
         max_tokens: int = 4096,
         system: str = "",
         images: list[bytes] | None = None,
+        effort: str | None = None,
     ) -> dict:
+        self._reject_effort(effort, "OpenAI")
         messages = []
         if system:
             messages.append({"role": "system", "content": system})
