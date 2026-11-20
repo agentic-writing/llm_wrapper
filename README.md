@@ -93,6 +93,19 @@ result = call_llm_with_tool(
 - The OpenAI, Gemini and Ollama providers raise `ValueError` when `effort` is set, before any request is sent.
 - With `LOG_LLM_CALLS=1`, the log records `effort` when it is set.
 
+**Token usage** (both call types):
+```python
+result, usage = call_llm_with_tool(..., return_usage=True)
+# usage → {"input_tokens": 1200, "output_tokens": 345,
+#          "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+```
+
+- Without `return_usage` (the default), the return value is unchanged.
+- `output_tokens` includes thinking tokens.
+- The Anthropic provider reports usage; the OpenAI, Gemini and Ollama providers return `None`
+  for now. The Fake provider reports the prompt's word count as `input_tokens`.
+- With `LOG_LLM_CALLS=1`, the log records `usage` when the provider reports it.
+
 **Images** (both call types, all providers):
 ```python
 with open("plot.png", "rb") as f:

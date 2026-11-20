@@ -52,6 +52,7 @@ class FakeProvider(BaseProvider):
             "images": self._check_images(images),
             "effort": effort,
         })
+        self.last_usage = self._fake_usage(prompt)
 
         if self.text_responses:
             return self.text_responses.popleft()
@@ -83,11 +84,18 @@ class FakeProvider(BaseProvider):
             "images": self._check_images(images),
             "effort": effort,
         })
+        self.last_usage = self._fake_usage(prompt)
 
         if self.tool_responses:
             return self.tool_responses.popleft()
 
         return self._default_tool_response(tool_name)
+
+    @staticmethod
+    def _fake_usage(prompt: str) -> dict:
+        """Usage in the Anthropic provider's format: the prompt's word count as input tokens."""
+        return {"input_tokens": len(prompt.split()), "output_tokens": 0,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
 
     @staticmethod
     def _default_tool_response(tool_name: str) -> dict:

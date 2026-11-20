@@ -12,6 +12,12 @@ _PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 class BaseProvider(ABC):
 
+    # Token usage of this provider's most recent call: a dict from providers that report it
+    # (see AnthropicProvider._usage), None from the others. llm.py resets it before each call
+    # and reads it right after. One provider instance is shared per process, so it is not
+    # safe to read across threads.
+    last_usage: dict | None = None
+
     @abstractmethod
     def call_text(
         self,

@@ -76,7 +76,8 @@ def _resolve_provider(provider: str | None, model: str) -> str:
 
 def _log_call(call_type: str, provider: str, model: str, system: str,
               prompt: str, response: str, tool_name: str = None,
-              image_count: int = 0, effort: str | None = None) -> None:
+              image_count: int = 0, effort: str | None = None,
+              usage: dict | None = None) -> None:
     if not LOG_LLM_CALLS:
         return
     entry = {
@@ -94,6 +95,8 @@ def _log_call(call_type: str, provider: str, model: str, system: str,
         entry["image_count"] = image_count  # the count only; image bytes are never logged
     if effort is not None:
         entry["effort"] = effort
+    if usage is not None:
+        entry["usage"] = usage
     with open(LOGS_DIR / "llm_calls.jsonl", "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -106,17 +109,23 @@ def call_llm(
     system: str = "",
     images: list[bytes] | None = None,
     effort: str | None = None,
-) -> str:
+    return_usage: bool = False,
+) -> str | tuple[str, dict | None]:
     """images: optional PNG bytes, placed ahead of the prompt in the user message.
-    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default."""
+    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default.
+    return_usage: return (text, usage) instead of text; usage is the call's token counts
+    from providers that report them (Anthropic), else None."""
     resolved = _resolve_provider(provider, model)
-    response = _get_provider(resolved).call_text(
+    llm = _get_provider(resolved)
+    llm.last_usage = None
+    response = llm.call_text(
         prompt=prompt, model=model, max_tokens=max_tokens, system=system, images=images,
         effort=effort,
     )
+    usage = llm.last_usage
     _log_call("text", resolved, model, system, prompt, response,
-              image_count=len(images) if images else 0, effort=effort)
-    return response
+              image_count=len(images) if images else 0, effort=effort, usage=usage)
+    return (response, usage) if return_usage else response
 
 
 def call_llm_with_tool(
@@ -129,15 +138,21 @@ def call_llm_with_tool(
     system: str = "",
     images: list[bytes] | None = None,
     effort: str | None = None,
-) -> dict:
+    return_usage: bool = False,
+) -> dict | tuple[dict, dict | None]:
     """images: optional PNG bytes, placed ahead of the prompt in the user message.
-    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default."""
+    effort: optional effort level (e.g. "low", "high"); Anthropic only, None = model default.
+    return_usage: return (tool input, usage) instead of the tool input; usage is the call's
+    token counts from providers that report them (Anthropic), else None."""
     resolved = _resolve_provider(provider, model)
-    response = _get_provider(resolved).call_tool(
+    llm = _get_provider(resolved)
+    llm.last_usage = None
+    response = llm.call_tool(
         prompt=prompt, tool_schema=tool_schema, tool_name=tool_name,
         model=model, max_tokens=max_tokens, system=system, images=images,
         effort=effort,
     )
+    usage = llm.last_usage
     _log_call("tool", resolved, model, system, prompt, json.dumps(response), tool_name,
-              image_count=len(images) if images else 0, effort=effort)
-    return response
+              image_count=len(images) if images else 0, effort=effort, usage=usage)
+    return (response, usage) if return_usage else response

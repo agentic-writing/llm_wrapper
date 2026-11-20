@@ -202,6 +202,73 @@ class TestCallLLM:
         assert "effort" not in second
 
 
+class TestUsage:
+    """return_usage=True returns (result, usage); the default return is unchanged."""
+
+    def _inject(self, monkeypatch, provider, name="fake"):
+        monkeypatch.setattr(llm_module, "_cache", {name: provider})
+
+    def test_default_return_unchanged(self, monkeypatch):
+        fake = FakeProvider()
+        fake.push_tool({"label": "neutral"})
+        self._inject(monkeypatch, fake)
+        assert call_llm_with_tool("a b c", _SENTIMENT_SCHEMA, "classify_sentiment", model="m",
+                                  provider="fake") == {"label": "neutral"}
+
+    def test_tool_and_text_return_usage(self, monkeypatch):
+        fake = FakeProvider()
+        fake.push_tool({"label": "neutral"})
+        fake.push_text("hi")
+        self._inject(monkeypatch, fake)
+        result, usage = call_llm_with_tool("a b c", _SENTIMENT_SCHEMA, "classify_sentiment", model="m",
+                                           provider="fake", return_usage=True)
+        assert result == {"label": "neutral"} and usage["input_tokens"] == 3
+        text, usage = call_llm("one two", model="m", provider="fake", return_usage=True)
+        assert text == "hi" and usage["input_tokens"] == 2
+
+    def test_provider_without_usage_returns_none_not_stale(self, monkeypatch):
+        class Silent(BaseProvider):
+            def call_text(self, prompt, model, max_tokens, system, images=None, effort=None):
+                return "t"
+
+            def call_tool(self, prompt, tool_schema, tool_name, model, max_tokens, system, images=None,
+                          effort=None):
+                return {"x": 1}
+
+        silent = Silent()
+        silent.last_usage = {"input_tokens": 99}  # left over from an earlier call
+        self._inject(monkeypatch, silent, "silent")
+        assert call_llm_with_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", provider="silent",
+                                  return_usage=True) == ({"x": 1}, None)
+
+    def test_log_records_usage(self, monkeypatch, tmp_path):
+        self._inject(monkeypatch, FakeProvider())
+        monkeypatch.setattr(llm_module, "LOG_LLM_CALLS", True)
+        monkeypatch.setattr(llm_module, "LOGS_DIR", tmp_path)
+        call_llm_with_tool("a b", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", provider="fake")
+        entry = json.loads((tmp_path / "llm_calls.jsonl").read_text())
+        assert entry["usage"]["input_tokens"] == 2
+
+    def test_anthropic_usage_from_response(self):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        provider = AnthropicProvider.__new__(AnthropicProvider)
+        provider._no_forced_tool = set()
+        provider.client = MagicMock()
+        provider.client.messages.create.return_value = SimpleNamespace(
+            stop_reason="tool_use",
+            content=[SimpleNamespace(type="tool_use", name="classify_sentiment", input={"label": "neutral"})],
+            usage=SimpleNamespace(input_tokens=1200, output_tokens=345, cache_creation_input_tokens=0,
+                                  cache_read_input_tokens=1000),
+        )
+        provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=5)
+        assert provider.last_usage == {"input_tokens": 1200, "output_tokens": 345,
+                                       "cache_creation_input_tokens": 0, "cache_read_input_tokens": 1000}
+
+    def test_anthropic_usage_none_without_usage_field(self):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        assert AnthropicProvider._usage(SimpleNamespace(stop_reason="end_turn", content=[])) is None
+
+
 class TestImageValidation:
     def test_none_means_no_images(self):
         assert BaseProvider._check_images(None) == []

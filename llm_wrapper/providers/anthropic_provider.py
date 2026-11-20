@@ -56,6 +56,19 @@ class AnthropicProvider(BaseProvider):
         return blocks
 
     @staticmethod
+    def _usage(response) -> dict | None:
+        """
+        Token counts of a response: input_tokens, output_tokens (which include thinking
+        tokens), cache_creation_input_tokens, cache_read_input_tokens. None if the response
+        carries no usage.
+        """
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return None
+        return {name: getattr(usage, name, None) for name in (
+            "input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")}
+
+    @staticmethod
     def _add_effort(kwargs: dict, effort: str | None) -> None:
         """
         Send effort as output_config.effort. Without it the request is unchanged and the
@@ -84,6 +97,7 @@ class AnthropicProvider(BaseProvider):
         self._add_effort(kwargs, effort)
 
         response = self.client.messages.create(**kwargs)
+        self.last_usage = self._usage(response)  # recorded even if truncated below
         self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
 
         return "\n".join(
@@ -114,6 +128,7 @@ class AnthropicProvider(BaseProvider):
         self._add_effort(kwargs, effort)
 
         response = self._create_calling_tool(kwargs, tool_name)
+        self.last_usage = self._usage(response)  # recorded even if truncated below
         self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
 
         for block in response.content:
