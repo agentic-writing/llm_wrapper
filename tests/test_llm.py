@@ -269,6 +269,73 @@ class TestUsage:
         assert AnthropicProvider._usage(SimpleNamespace(stop_reason="end_turn", content=[])) is None
 
 
+class TestAnthropicStreaming:
+    """Requests with max_tokens above STREAM_ABOVE_MAX_TOKENS are streamed; smaller ones are not."""
+
+    REPLY = SimpleNamespace(
+        stop_reason="tool_use",
+        content=[SimpleNamespace(type="text", text="ok"),
+                 SimpleNamespace(type="tool_use", name="classify_sentiment", input={"label": "neutral"})],
+        usage=SimpleNamespace(input_tokens=10, output_tokens=30000, cache_creation_input_tokens=0,
+                              cache_read_input_tokens=0),
+    )
+
+    def _provider(self, stream_side_effect=None):
+        from llm_wrapper.providers.anthropic_provider import AnthropicProvider
+        provider = AnthropicProvider.__new__(AnthropicProvider)
+        provider._no_forced_tool = set()
+        provider.client = MagicMock()
+        provider.client.messages.create.return_value = self.REPLY
+
+        def stream(**kwargs):
+            if stream_side_effect:
+                stream_side_effect(kwargs)
+            manager = MagicMock()
+            manager.__enter__.return_value.get_final_message.return_value = self.REPLY
+            return manager
+
+        provider.client.messages.stream.side_effect = stream
+        return provider
+
+    def _tool(self, provider, max_tokens, **kwargs):
+        return provider.call_tool("p", _SENTIMENT_SCHEMA, "classify_sentiment", model="m", max_tokens=max_tokens,
+                                  **kwargs)
+
+    def test_large_max_tokens_streams(self):
+        provider = self._provider()
+        assert self._tool(provider, 64000, effort="max") == {"label": "neutral"}
+        provider.client.messages.create.assert_not_called()
+        sent = provider.client.messages.stream.call_args.kwargs
+        assert sent["max_tokens"] == 64000 and sent["output_config"] == {"effort": "max"}
+        assert sent["tool_choice"] == {"type": "tool", "name": "classify_sentiment"}
+        assert provider.last_usage["output_tokens"] == 30000
+
+    def test_small_max_tokens_does_not_stream(self):
+        provider = self._provider()
+        self._tool(provider, 16000)
+        provider.client.messages.stream.assert_not_called()
+        provider.client.messages.create.assert_called_once()
+
+    def test_text_call_streams_too(self):
+        provider = self._provider()
+        assert provider.call_text("p", model="m", max_tokens=32000) == "ok"
+        provider.client.messages.create.assert_not_called()
+
+    def test_forced_tool_fallback_when_streaming(self):
+        from anthropic import BadRequestError
+        request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        rejected = BadRequestError('tool_choice: type "tool" and "any" are not supported for this model.',
+                                   response=httpx.Response(400, request=request), body=None)
+
+        def reject_forced(kwargs):
+            if kwargs["tool_choice"]["type"] != "auto":
+                raise rejected
+
+        provider = self._provider(reject_forced)
+        assert self._tool(provider, 64000) == {"label": "neutral"}
+        assert [c.kwargs["tool_choice"]["type"] for c in provider.client.messages.stream.call_args_list] == ["tool", "auto"]
+
+
 class TestImageValidation:
     def test_none_means_no_images(self):
         assert BaseProvider._check_images(None) == []

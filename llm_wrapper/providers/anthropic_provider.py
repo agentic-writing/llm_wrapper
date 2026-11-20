@@ -15,11 +15,23 @@ from llm_wrapper.providers.base_provider import BaseProvider
 
 class AnthropicProvider(BaseProvider):
 
+    # Requests with max_tokens above this are streamed (the result is the same Message). The SDK
+    # refuses long non-streaming requests (above about 21,000 max_tokens), and a long call
+    # without streaming can hit the 10-minute request timeout.
+    STREAM_ABOVE_MAX_TOKENS = 16_000
+
     def __init__(self):
         if not os.getenv("ANTHROPIC_API_KEY"):
             raise RuntimeError("ANTHROPIC_API_KEY missing")
         self.client = Anthropic()
         self._no_forced_tool: set[str] = set()
+
+    def _send(self, kwargs: dict) -> object:
+        """messages.create, or a streamed request read to the end for a large max_tokens."""
+        if kwargs.get("max_tokens", 0) > self.STREAM_ABOVE_MAX_TOKENS:
+            with self.client.messages.stream(**kwargs) as stream:
+                return stream.get_final_message()
+        return self.client.messages.create(**kwargs)
 
     def _create_calling_tool(self, kwargs: dict, tool_name: str) -> object:
         """
@@ -31,7 +43,7 @@ class AnthropicProvider(BaseProvider):
         model = kwargs["model"]
         if model not in self._no_forced_tool:
             try:
-                return self.client.messages.create(**kwargs, tool_choice={"type": "tool", "name": tool_name})
+                return self._send({**kwargs, "tool_choice": {"type": "tool", "name": tool_name}})
             except BadRequestError as error:
                 if "tool_choice" not in str(error) or "not supported" not in str(error):
                     raise
@@ -40,7 +52,7 @@ class AnthropicProvider(BaseProvider):
         instruction = f"You must respond by calling the {tool_name} tool."
         system = kwargs.get("system")
         auto_kwargs = {**kwargs, "system": f"{system}\n\n{instruction}" if system else instruction}
-        return self.client.messages.create(**auto_kwargs, tool_choice={"type": "auto"})
+        return self._send({**auto_kwargs, "tool_choice": {"type": "auto"}})
 
     @classmethod
     def _user_content(cls, prompt: str, images: list[bytes] | None) -> str | list[dict]:
@@ -96,7 +108,7 @@ class AnthropicProvider(BaseProvider):
             kwargs["system"] = system
         self._add_effort(kwargs, effort)
 
-        response = self.client.messages.create(**kwargs)
+        response = self._send(kwargs)
         self.last_usage = self._usage(response)  # recorded even if truncated below
         self._raise_if_truncated(response.stop_reason == "max_tokens", max_tokens)
 

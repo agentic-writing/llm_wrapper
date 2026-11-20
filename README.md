@@ -90,6 +90,7 @@ result = call_llm_with_tool(
 - Sent as `output_config.effort`. Omit `effort` (or pass `None`) to use the model's default.
 - The levels a model accepts differ by model; the API rejects an unsupported level with a 400 (`anthropic.BadRequestError`).
 - Higher effort means more thinking, and thinking tokens count toward `max_tokens`. If a call raises "Response truncated", raise `max_tokens`.
+- Anthropic requests with `max_tokens` above 16,000 are streamed (the returned value is the same), so large limits work: e.g. 64,000 for `xhigh` / `max`. The SDK refuses non-streaming requests above about 21,000.
 - The OpenAI, Gemini and Ollama providers raise `ValueError` when `effort` is set, before any request is sent.
 - With `LOG_LLM_CALLS=1`, the log records `effort` when it is set.
 
